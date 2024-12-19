@@ -16,4 +16,5 @@ export interface BusRoute {
   capacity: number;
   route: Stop[];
   studentsAssigned: number;
+  estimatedTimeMinutes: number;
 }

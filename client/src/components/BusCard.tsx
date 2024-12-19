@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bus, Users } from 'lucide-react';
+import { Bus, Users, Clock } from 'lucide-react';
 import type { BusRoute } from '../types';
 import { RouteStop } from './RouteStop';
 import { calculateUtilization } from '../utils/busUtils';
@@ -29,7 +29,14 @@ export const BusCard: React.FC<BusCardProps> = ({ busRoute }) => {
           </span>
         </div>
       </div>
-      
+
+      <div className="mb-4 flex items-center gap-2 text-gray-600">
+        <Clock className="w-5 h-5 text-gray-600" />
+        <span className="text-sm">
+          Estimated time: {busRoute.estimatedTimeMinutes} minutes
+        </span>
+      </div>
+
       <div className="space-y-4">
         {busRoute.route.length === 0 ? (
           <p className="text-gray-500 italic">No stops assigned</p>

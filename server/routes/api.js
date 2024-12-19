@@ -1,46 +1,47 @@
 import express from "express";
+import OpenRouteService from "openrouteservice-js";
+
 const router = express.Router();
+const orsClient = new OpenRouteService.Directions({
+  api_key: "5b3ce3597851110001cf6248d73b1b2b99574a09aa1cfc768fad09ac", // Replace with your API key
+});
 
-function calculateDistance(coord1, coord2) {
-  const R = 6371; // Radius of the Earth in km
-  const toRadians = (deg) => (deg * Math.PI) / 180;
+// Function to get travel information (distance and duration) between two points
+async function getTravelInfo(origin, destination) {
+  try {
+    const response = await orsClient.calculate({
+      coordinates: [
+        [origin.lon, origin.lat],
+        [destination.lon, destination.lat],
+      ],
+      profile: "driving-car", // Use the car driving profile
+      format: "geojson",
+    });
 
-  const dLat = toRadians(coord2.lat - coord1.lat);
-  const dLon = toRadians(coord2.lon - coord1.lon);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRadians(coord1.lat)) *
-      Math.cos(toRadians(coord2.lat)) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distance in km
+    const route = response.features[0].properties.segments[0];
+    return {
+      distance: route.distance / 1609.34, // Convert meters to miles
+      duration: route.duration / 60,     // Convert seconds to minutes
+    };
+  } catch (error) {
+    console.error("Error fetching travel info:", error.message);
+    throw new Error("Failed to fetch travel info.");
+  }
 }
 
-// Function to optimize routes
-function optimizeRoutes(buses, stops, school) {
-  buses.sort((a, b) => b.seats - a.seats);
-
-  stops.forEach((stop) => {
-    stop.distanceToSchool = calculateDistance(
-      stop.coordinates,
-      school.coordinates
-    );
-  });
-
-  stops.sort(
-    (a, b) => a.distanceToSchool - b.distanceToSchool || b.students - a.students
-  );
+// Function to optimize routes for buses
+async function optimizeRoutes(buses, stops, school) {
+  buses.sort((a, b) => b.seats - a.seats); // Sort buses by capacity (descending)
 
   const routes = buses.map((bus) => ({
     busId: bus.id,
     capacity: bus.seats,
     route: [],
     studentsAssigned: 0,
+    estimatedTimeMinutes: 0, // Initialize estimated time for each route
   }));
 
+  // Assign stops to buses
   for (const stop of stops) {
     let studentsLeft = stop.students;
 
@@ -68,7 +69,8 @@ function optimizeRoutes(buses, stops, school) {
     }
   }
 
-  routes.forEach((route) => {
+  // Add school as the final stop and calculate travel distances and times
+  for (const route of routes) {
     if (route.route.length > 0) {
       route.route.push({
         stopId: null,
@@ -77,13 +79,40 @@ function optimizeRoutes(buses, stops, school) {
         coordinates: school.coordinates,
         students: 0,
       });
+    } else {
+      // If no stops were assigned to this bus, make school the only stop
+      route.route.push({
+        stopId: null,
+        location: school.location,
+        address: school.address,
+        coordinates: school.coordinates,
+        students: 0,
+      });
     }
-  });
+
+    // Calculate total distance and time for the route
+    let totalDistance = 0;
+    let totalTimeMinutes = 0;
+
+    for (let i = 0; i < route.route.length - 1; i++) {
+      const currentStop = route.route[i];
+      const nextStop = route.route[i + 1];
+
+      // Fetch travel information between stops
+      const travelInfo = await getTravelInfo(currentStop.coordinates, nextStop.coordinates);
+      totalDistance += travelInfo.distance;
+      totalTimeMinutes += travelInfo.duration;
+    }
+
+    // Assign estimated time for the bus route
+    route.estimatedTimeMinutes = Math.round(totalTimeMinutes);
+  }
 
   return routes;
 }
 
-router.get("/", (req, res) => {
+// GET route: Optimizes and returns routes for buses and stops
+router.get("/", async (req, res) => {
   const buses = [
     { id: 1, seats: 50 },
     { id: 2, seats: 40 },
@@ -114,18 +143,19 @@ router.get("/", (req, res) => {
   };
 
   try {
-    const optimizedRoutes = optimizeRoutes(buses, stops, schoolLocation);
+    const optimizedRoutes = await optimizeRoutes(buses, stops, schoolLocation);
     res.json(optimizedRoutes);
   } catch (error) {
     res.status(500).send({ error: error.message });
   }
 });
 
-router.post("/", (req, res) => {
+// POST route: Accepts buses, stops, and schoolLocation in request body to optimize and return routes
+router.post("/", async (req, res) => {
   const { buses, stops, schoolLocation } = req.body;
 
   try {
-    const optimizedRoutes = optimizeRoutes(buses, stops, schoolLocation);
+    const optimizedRoutes = await optimizeRoutes(buses, stops, schoolLocation);
     res.json(optimizedRoutes);
   } catch (error) {
     res.status(500).send({ error: error.message });
